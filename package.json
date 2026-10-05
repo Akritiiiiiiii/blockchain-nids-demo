@@ -1,0 +1,7 @@
+{
+  "name": "blockchain-nids-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hash-anchored NIDS ledger demo (static site)",
+  "scripts": { "dev": "npx serve ." }
+}

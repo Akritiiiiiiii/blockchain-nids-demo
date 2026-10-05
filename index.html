@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hash-anchored NIDS ledger demo</title>
+<meta name="description" content="A working blockchain demo: IDS alerts stay off-chain, only Merkle roots are anchored on-chain.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🔗%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;800&family=Source+Serif+4:wght@400;600&display=swap">
+<style>
+:root{--bg:#e3e9e2;--panel:#f3f6f1;--ink:#16261f;--mute:#566a60;--line:#b9c6bb;--hi:#1f4a39;--hi-t:#f3f6f1;--sig:#b4781a;--bad:#a8321f;--ok:#1f6b45;--mono:ui-monospace,Menlo,Consolas,monospace;--head:"Bricolage Grotesque","Trebuchet MS",sans-serif;--body:"Source Serif 4",Georgia,serif;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#101a15;--panel:#18261f;--ink:#e4ece6;--mute:#9bb0a3;--line:#2f4439;--hi:#7fc4a0;--hi-t:#0f1d16;--sig:#e0a64a;--bad:#ff8b74;--ok:#7fc4a0}}
+:root[data-theme="dark"]{--bg:#101a15;--panel:#18261f;--ink:#e4ece6;--mute:#9bb0a3;--line:#2f4439;--hi:#7fc4a0;--hi-t:#0f1d16;--sig:#e0a64a;--bad:#ff8b74;--ok:#7fc4a0}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.55 var(--body)}
+main{max-width:1180px;margin:0 auto;padding:44px 22px 80px}
+h1{font:800 clamp(2rem,5vw,3.6rem)/1.04 var(--head);letter-spacing:-.02em;margin:0 0 14px;max-width:16em}
+h2{font:800 1.25rem/1.2 var(--head);margin:0 0 10px}
+p{margin:0 0 .9em;max-width:64ch}
+.lede{color:var(--mute);font-size:1.1rem}
+.grid{display:grid;grid-template-columns:minmax(0,300px) minmax(0,1fr);gap:28px;margin-top:36px;align-items:start}
+.panel{background:var(--panel);padding:22px;border-top:6px solid var(--hi)}
+.panel+.panel{margin-top:20px}
+button{font:500 1rem var(--head);cursor:pointer;border:2px solid var(--hi);background:var(--hi);color:var(--hi-t);padding:9px 14px;width:100%;margin-top:8px;min-height:44px}
+button.alt{background:transparent;color:var(--ink);border-color:var(--ink)}
+button.warn{background:transparent;color:var(--bad);border-color:var(--bad)}
+button:disabled{opacity:.5;cursor:wait}
+button:focus-visible,select:focus-visible{outline:3px solid var(--sig);outline-offset:2px}
+select{font:500 1rem var(--head);width:100%;padding:8px;background:var(--panel);color:var(--ink);border:2px solid var(--line);min-height:40px}
+label{font:500 .95rem var(--head);display:block;margin-top:12px}
+.pend{max-height:230px;overflow:auto;font:.82rem/1.5 var(--mono);margin:10px 0 0;padding:0;list-style:none}
+.pend li{padding:3px 0;border-bottom:1px solid var(--line)}
+.chain{display:flex;gap:0;overflow-x:auto;padding-bottom:14px;align-items:stretch}
+.blk{flex:0 0 250px;background:var(--panel);border-top:6px solid var(--ok);padding:14px;font:.8rem/1.5 var(--mono);position:relative;margin-right:26px}
+.blk::after{content:"";position:absolute;right:-26px;top:50%;width:26px;height:3px;background:var(--ink)}
+.blk:last-child{margin-right:0}.blk:last-child::after{display:none}
+.blk.bad{border-top-color:var(--bad)}
+.blk h3{font:800 1rem var(--head);margin:0 0 6px}
+.blk .st{font:500 .85rem var(--head);color:var(--ok)}
+.blk.bad .st{color:var(--bad)}
+.blk dt{color:var(--mute);margin-top:6px}.blk dd{margin:0;word-break:break-all}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:22px}
+.stats div{background:var(--panel);padding:14px;border-left:6px solid var(--sig)}
+.stats b{font:800 1.6rem/1.1 var(--head);display:block}
+.stats span{color:var(--mute);font-size:.9rem}
+#msg{min-height:1.6em;font:500 1rem var(--head);margin:0 0 14px}
+@media (max-width:820px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<main>
+<h1>A ledger that stores proof of IDS alerts, not the alerts</h1>
+<p class="lede">Alerts stay off-chain. Each block anchors only the Merkle root of a batch, so the chain stays small and any edit to an alert is detectable. Everything runs in your browser with real SHA-256 and proof-of-work.</p>
+
+<div class="grid">
+<aside>
+<div class="panel">
+<h2>Generate alerts</h2>
+<p id="pc">0 alerts waiting for a block.</p>
+<button id="gen">Capture 5 alerts</button>
+<ul class="pend" id="pend"></ul>
+</div>
+<div class="panel">
+<h2>Anchor a batch</h2>
+<label for="diff">Mining difficulty (leading zeros)</label>
+<select id="diff"><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option></select>
+<button id="mine">Mine block</button>
+</div>
+<div class="panel">
+<h2>Attack the ledger</h2>
+<button class="warn" id="tlog">Edit an off-chain alert</button>
+<button class="warn" id="thead">Edit an on-chain Merkle root</button>
+<button class="alt" id="ver">Verify chain</button>
+<button class="alt" id="rst">Reset</button>
+</div>
+</aside>
+
+<section>
+<p id="msg" role="status" aria-live="polite"></p>
+<div class="stats">
+<div><b id="s1">0 B</b><span>Stored on-chain</span></div>
+<div><b id="s2">0 B</b><span>Alerts kept off-chain</span></div>
+<div><b id="s3">-</b><span>On-chain data reduced by</span></div>
+</div>
+<div class="chain" id="chain" tabindex="0" aria-label="Blockchain"></div>
+<p style="margin-top:18px">Each header is about 84 bytes: index 4, previous hash 32, Merkle root 32, timestamp 8, nonce 8. Editing an alert changes its Merkle root, which no longer matches the anchored one. Editing the anchored root changes the block hash, which no longer matches the stored hash and breaks the link to the next block.</p>
+</section>
+</div>
+</main>
+
+<script>
+var HDR=84,chain=[],off={},pend=[],busy=false;
+var $=function(i){return document.getElementById(i)};
+var TY=["DoS","PortScan","BruteForce","Botnet","Infiltration","WebAttack"],SEV=["low","medium","high"];
+function rnd(a){return a[Math.floor(Math.random()*a.length)]}
+function ip(){return "10.0."+Math.floor(Math.random()*255)+"."+Math.floor(Math.random()*254+1)}
+async function sha(s){var b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s));return Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,"0")}).join("")}
+async function merkle(items){
+ if(!items.length)return sha("");
+ var l=await Promise.all(items.map(function(a){return sha(JSON.stringify(a))}));
+ while(l.length>1){var n=[];for(var i=0;i<l.length;i+=2)n.push(await sha(l[i]+(l[i+1]||l[i])));l=n}
+ return l[0]}
+function bh(b){return sha(b.index+"|"+b.prev+"|"+b.root+"|"+b.ts+"|"+b.nonce)}
+async function genesis(){var r=await merkle([]),b={index:0,prev:"0".repeat(64),root:r,ts:Date.now(),nonce:0};b.hash=await bh(b);chain=[b];off={0:[]}}
+function say(t){$("msg").textContent=t}
+function kb(n){return n<1000?n+" B":(n/1000).toFixed(1)+" KB"}
+function render(st){
+ st=st||{};
+ var c=$("chain");c.innerHTML="";
+ chain.forEach(function(b,i){
+  var d=document.createElement("div");d.className="blk"+(st[i]&&st[i]!=="valid"?" bad":"");
+  var h=document.createElement("h3");h.textContent=i===0?"Genesis":"Block "+i;d.appendChild(h);
+  var s=document.createElement("div");s.className="st";s.textContent=st[i]?(st[i]==="valid"?"Valid":st[i]):"Not yet verified";d.appendChild(s);
+  var dl=document.createElement("dl");
+  [["Alerts in batch",String(off[i].length)],["Merkle root",b.root.slice(0,16)+"..."],["Previous",b.prev.slice(0,16)+"..."],["Hash",b.hash.slice(0,16)+"..."],["Nonce",String(b.nonce)]].forEach(function(x){
+   var t=document.createElement("dt"),v=document.createElement("dd");t.textContent=x[0];v.textContent=x[1];dl.appendChild(t);dl.appendChild(v)});
+  d.appendChild(dl);c.appendChild(d)});
+ var on=chain.length*HDR,of=0;Object.keys(off).forEach(function(k){of+=JSON.stringify(off[k]).length});
+ $("s1").textContent=kb(on);$("s2").textContent=kb(of);$("s3").textContent=of>0?Math.round(of/on*10)/10+"x":"-";
+ $("pc").textContent=pend.length+" alert"+(pend.length===1?"":"s")+" waiting for a block.";
+ var p=$("pend");p.innerHTML="";pend.forEach(function(a){var li=document.createElement("li");li.textContent=a.src+" "+a.type+" ("+a.sev+")";p.appendChild(li)});
+ c.scrollLeft=c.scrollWidth}
+function lock(v){busy=v;["gen","mine","tlog","thead","ver","rst"].forEach(function(i){$(i).disabled=v})}
+$("gen").onclick=function(){for(var i=0;i<5;i++)pend.push({src:ip(),type:rnd(TY),sev:rnd(SEV),t:Date.now()+i});say("Captured 5 alerts. They are held off-chain.");render()};
+$("mine").onclick=async function(){
+ if(!pend.length){say("Capture some alerts first.");return}
+ lock(true);say("Mining...");
+ var prev=chain[chain.length-1],z="0".repeat(+$("diff").value),b={index:chain.length,prev:prev.hash,root:await merkle(pend),ts:Date.now(),nonce:0};
+ while(true){b.hash=await bh(b);if(b.hash.indexOf(z)===0)break;b.nonce++}
+ off[b.index]=pend;pend=[];chain.push(b);
+ say("Block "+b.index+" mined after "+(b.nonce+1)+" attempts. Only its 84-byte header went on-chain.");lock(false);render()};
+$("tlog").onclick=function(){
+ var ks=chain.map(function(b,i){return i}).filter(function(i){return off[i].length});
+ if(!ks.length){say("Mine a block with alerts first.");return}
+ var k=rnd(ks);off[k][0].sev=off[k][0].sev==="high"?"low":"high";
+ say("Changed one alert's severity in the off-chain log of block "+k+". Run Verify chain.");render()};
+$("thead").onclick=function(){
+ if(chain.length<2){say("Mine a block first.");return}
+ var k=1+Math.floor(Math.random()*(chain.length-1));chain[k].root="f".repeat(64);
+ say("Overwrote the Merkle root stored in block "+k+". Run Verify chain.");render()};
+$("ver").onclick=async function(){
+ lock(true);var st={},bad=0;
+ for(var i=0;i<chain.length;i++){var b=chain[i],r="valid";
+  if(await bh(b)!==b.hash)r="Header edited";
+  else if(i>0&&b.prev!==chain[i-1].hash)r="Link broken";
+  else if(await merkle(off[i])!==b.root)r="Alert log edited";
+  if(r!=="valid")bad++;st[i]=r}
+ say(bad?bad+" block"+(bad>1?"s":"")+" failed verification.":"All "+chain.length+" blocks verified.");lock(false);render(st)};
+$("rst").onclick=async function(){lock(true);pend=[];await genesis();say("Ledger reset.");lock(false);render()};
+if(!window.crypto||!crypto.subtle){say("This demo needs HTTPS (or localhost) for the Web Crypto API.")}
+else genesis().then(function(){render();say("Capture alerts, mine a block, then try an attack.")});
+</script>
+</body>
+</html>
